@@ -183,3 +183,90 @@ end
 
 display(fig)
 save("combined_mesh_debug.png", fig)
+
+# Reorder Comodo vertices to match ClimaCore unique ordering
+
+perm = zeros(Int, length(xk))
+used = falses(length(Vn))
+tol = 1e-8
+
+for k in eachindex(xk)
+    best_j = 0
+    best_d2 = Inf
+
+    for j in eachindex(Vn)
+        dx = xk[k] - Vn[j][1]
+        dy = yk[k] - Vn[j][2]
+        dz = zk[k] - Vn[j][3]
+        d2 = dx*dx + dy*dy + dz*dz
+
+        if d2 < best_d2
+            best_d2 = d2
+            best_j = j
+        end
+    end
+
+    if best_j == 0 || best_d2 > tol^2
+        error("No Comodo match found for ClimaCore point $k (best distance = $(sqrt(best_d2)))")
+    end
+
+    if used[best_j]
+        error("Comodo vertex $best_j matched more than once")
+    end
+
+    perm[k] = best_j
+    used[best_j] = true
+end
+
+println("ClimaCore -> Comodo permutation:")
+println(perm)
+
+# Reorder Comodo vertices into ClimaCore ordering
+Vn_reordered = Vn[perm]
+
+vx_re = [p[1] for p in Vn_reordered]
+vy_re = [p[2] for p in Vn_reordered]
+vz_re = [p[3] for p in Vn_reordered]
+
+# Build inverse permutation so old face indices can be rewritten
+invperm = zeros(Int, length(perm))
+for k in eachindex(perm)
+    invperm[perm[k]] = k
+end
+
+# Remap Comodo faces into the reordered indexing
+Fn_reordered = similar(Fn)
+for f in eachindex(Fn)
+    i1, i2, i3, i4 = Tuple(Fn[f])
+    Fn_reordered[f] = (invperm[i1], invperm[i2], invperm[i3], invperm[i4])
+end
+
+# Second figure: reordered Comodo mesh
+
+fig2 = Figure(size = (700, 600))
+ax4 = Axis3(fig2[1, 1], aspect = :data, title = "Comodo Reordered to ClimaCore")
+
+# Reordered Comodo points + labels
+scatter!(ax4, vx_re, vy_re, vz_re, markersize = 16)
+
+for i in eachindex(vx_re)
+    text!(ax4, vx_re[i], vy_re[i], vz_re[i], text = string(i), fontsize = 14)
+end
+
+# Reordered quad edges
+for face in Fn_reordered
+    i1, i2, i3, i4 = Tuple(face)
+
+    p1 = Vn_reordered[i1]
+    p2 = Vn_reordered[i2]
+    p3 = Vn_reordered[i3]
+    p4 = Vn_reordered[i4]
+
+    lines!(ax4, [p1[1], p2[1]], [p1[2], p2[2]], [p1[3], p2[3]])
+    lines!(ax4, [p2[1], p3[1]], [p2[2], p3[2]], [p2[3], p3[3]])
+    lines!(ax4, [p3[1], p4[1]], [p3[2], p4[2]], [p3[3], p4[3]])
+    lines!(ax4, [p4[1], p1[1]], [p4[2], p1[2]], [p4[3], p1[3]])
+end
+
+display(fig2)
+save("comodo_reordered_debug.png", fig2)
